@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+
+# Copyright (c) 2025, Lawrence Livermore National Security, LLC.
+# Produced at the Lawrence Livermore National Laboratory.
+# Written by Olaf Faaland <faaland1@llnl.gov>
+# LLNL-CODE-468512
+#
+# This file is part of lustre-tools-llnl.
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License (as published by the
+# Free Software Foundation) version 2, dated June 1991.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the IMPLIED WARRANTY OF
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# terms and conditions of the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+
+# Given the output of "lfs getstripe", and a mountpoint, give
+# the paths to the OST objects assuming a ZFS-based OST.
+#
+# For example, given mountpoint "/mnt/olaf" and input
+#   test.pfl.3
+#   - 0: { l_ost_idx: 4, l_fid: [0x480000403:0x3ab09:0x0] }
+# emit
+# test.pfl.3 OST0004 /mnt/olaf/480000403/d9/240393
+
+import argparse
+import sys
+import subprocess
+import re
+
+def from_bytes(b):
+    return sum(b[i] << i * 8 for i in range(len(b)))
+
+def make_arg_parser():
+    description = (
+        "Given the mountpoint for a zfs dataset for a Lustre OST as an argument"
+        "and the output of 'lfs getstripe' on stdin, this script will give "
+        "the paths to the stripe objects under that mountpoint."
+    )
+    arg_parser = argparse.ArgumentParser(description=description)
+    arg_parser.add_argument("mountpoint", help="mountpoint the name of the OST's zfs dataset")
+
+    return arg_parser
+
+fid_re = re.compile('(0x[0-9a-f]+):(0x[0-9a-f]+):(0x[0-9a-f]+)')
+def fid_to_path(fid):
+    path_s = None
+    fid_m = fid_re.match(fid)
+
+    if fid_m:
+        seq_s = fid_m.group(1)
+        oid_s = fid_m.group(2)
+        ver_s = fid_m.group(3)
+        oid = int(oid_s, 16)
+        path_s = f'O/{seq_s[2:]}/d{oid % 32}/{oid}'
+
+    return path_s
+
+fname_re = re.compile("^([^\s]+)$")
+lmm_object_re = re.compile(' +- ([0-9]+): +. l_ost_idx: ([0-9]+), l_fid: .(0x[0-9a-f]+:0x[0-9a-f]+:0x[0-9a-f]+). .')
+
+def striping_parser():
+    fname = None
+    for line in sys.stdin:
+        line_type = None
+        fname_m = fname_re.match(line)
+        lmm_m = lmm_object_re.match(line)
+
+        if fname_m:
+            line_type = 'name'
+            fname = line.rstrip()
+        elif lmm_m:
+            line_type = 'lmm'
+            ost = lmm_m.group(2)
+            fpath = fid_to_path(lmm_m.group(3))
+            print(f'{fname} OST{int(ost):04} {fpath}')
+
+def main():
+    arg_parser = make_arg_parser()
+    args = arg_parser.parse_args()
+
+    striping_parser()
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
