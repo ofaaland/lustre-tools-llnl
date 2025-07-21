@@ -68,14 +68,19 @@ def fid_to_path(fid):
     return path_s
 
 hex_re = re.compile('(0x[0-9a-f]+)')
-def objid_to_path(oid_s):
+def objid_to_path(oid_s, group_s):
     path_s = None
     oid_m = hex_re.match(oid_s)
+    group_m = hex_re.match(group_s)
 
     if oid_m:
         seq_s = 0
         oid = int(oid_s, 16)
-        path_s = f'O/{seq_s}/d{oid % 32}/{oid}'
+        if group_m:
+            group = group_s[2:]
+        else:
+            group = "0"
+        path_s = f'O/{group}/d{oid % 32}/{oid}'
 
     return path_s
 
@@ -98,7 +103,9 @@ def striping_parser():
             print(f'{fname} OST{int(ost):04x} {fpath}')
         elif lmm_simple_m:
             ost = lmm_simple_m.group(1)
-            fpath = objid_to_path(lmm_simple_m.group(3))
+            group = lmm_simple_m.group(4)
+            objid = lmm_simple_m.group(3)
+            fpath = objid_to_path(objid, group)
             print(f'{fname} OST{int(ost):04x} {fpath}')
 
 def main():
