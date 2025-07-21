@@ -81,7 +81,7 @@ def objid_to_path(oid_s):
 
 fname_re = re.compile("^([^\s]+)$")
 lmm_object_pfl_re = re.compile(' +- ([0-9]+): +. l_ost_idx: ([0-9]+), l_fid: .(0x[0-9a-f]+:0x[0-9a-f]+:0x[0-9a-f]+). .')
-lmm_object_simple_re = re.compile(' +- ([0-9]+) ([0-9]+) (0x[0-9a-f]+) (0x[0-9a-f]+)')
+lmm_object_simple_re = re.compile(' +([0-9]+) +([0-9]+) +(0x[0-9a-f]+) +(0*x*[0-9a-f]+)')
 
 def striping_parser():
     fname = None
