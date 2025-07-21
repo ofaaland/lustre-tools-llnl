@@ -28,6 +28,11 @@
 #   - 0: { l_ost_idx: 4, l_fid: [0x480000403:0x3ab09:0x0] }
 # emit
 # test.pfl.3 OST0004 /mnt/olaf/480000403/d9/240393
+#
+# "lfs getstripe" output for a non-pfl ("simple") file like this
+# is also parsed.
+#         obdidx           objid           objid           group
+#              1       174345597      0xa644d7d      0x2c0000400
 
 import argparse
 import sys
@@ -62,23 +67,38 @@ def fid_to_path(fid):
 
     return path_s
 
+hex_re = re.compile('0x[0-9a-f]+)')
+def objid_to_path(oid_s)
+    path_s = None
+    oid_m = hex_re.match(oid_s)
+
+    if oid_m:
+        seq_s = 0
+        oid = int(oid_s, 16)
+        path_s = f'O/{seq_s[2:]}/d{oid % 32}/{oid}'
+
+    return path_s
+
 fname_re = re.compile("^([^\s]+)$")
-lmm_object_re = re.compile(' +- ([0-9]+): +. l_ost_idx: ([0-9]+), l_fid: .(0x[0-9a-f]+:0x[0-9a-f]+:0x[0-9a-f]+). .')
+lmm_object_pfl_re = re.compile(' +- ([0-9]+): +. l_ost_idx: ([0-9]+), l_fid: .(0x[0-9a-f]+:0x[0-9a-f]+:0x[0-9a-f]+). .')
+lmm_object_simple_re = re.compile(' +- ([0-9]+) ([0-9]+) (0x[0-9a-f]+) (0x[0-9a-f]+)')
 
 def striping_parser():
     fname = None
     for line in sys.stdin:
-        line_type = None
         fname_m = fname_re.match(line)
-        lmm_m = lmm_object_re.match(line)
+        lmm_m = lmm_object_pfl_re.match(line)
+        lmm_simple_m = lmm_object_simple_re.match(line)
 
         if fname_m:
-            line_type = 'name'
             fname = line.rstrip()
         elif lmm_m:
-            line_type = 'lmm'
             ost = lmm_m.group(2)
             fpath = fid_to_path(lmm_m.group(3))
+            print(f'{fname} OST{int(ost):04x} {fpath}')
+        elif lmm_simple_m:
+            ost = lmm_m.group(1)
+            fpath = objid_to_path(lmm_m.group(3))
             print(f'{fname} OST{int(ost):04x} {fpath}')
 
 def main():
