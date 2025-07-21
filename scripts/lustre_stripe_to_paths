@@ -79,7 +79,7 @@ def striping_parser():
             line_type = 'lmm'
             ost = lmm_m.group(2)
             fpath = fid_to_path(lmm_m.group(3))
-            print(f'{fname} OST{int(ost):04} {fpath}')
+            print(f'{fname} OST{int(ost):04x} {fpath}')
 
 def main():
     arg_parser = make_arg_parser()
