@@ -75,7 +75,7 @@ def objid_to_path(oid_s):
     if oid_m:
         seq_s = 0
         oid = int(oid_s, 16)
-        path_s = f'O/{seq_s[2:]}/d{oid % 32}/{oid}'
+        path_s = f'O/{seq_s}/d{oid % 32}/{oid}'
 
     return path_s
 
@@ -97,8 +97,8 @@ def striping_parser():
             fpath = fid_to_path(lmm_m.group(3))
             print(f'{fname} OST{int(ost):04x} {fpath}')
         elif lmm_simple_m:
-            ost = lmm_m.group(1)
-            fpath = objid_to_path(lmm_m.group(3))
+            ost = lmm_simple_m.group(1)
+            fpath = objid_to_path(lmm_simple_m.group(3))
             print(f'{fname} OST{int(ost):04x} {fpath}')
 
 def main():
