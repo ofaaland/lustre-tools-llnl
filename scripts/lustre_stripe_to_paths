@@ -39,6 +39,8 @@ import sys
 import subprocess
 import re
 
+args = None
+
 def from_bytes(b):
     return sum(b[i] << i * 8 for i in range(len(b)))
 
@@ -106,9 +108,11 @@ def striping_parser():
             group = lmm_simple_m.group(4)
             objid = lmm_simple_m.group(3)
             fpath = objid_to_path(objid, group)
-            print(f'{fname} OST{int(ost):04x} {fpath}')
+            print(f'{fname} OST{int(ost):04x} {args.mountpoint}/{fpath}')
 
 def main():
+    global args
+
     arg_parser = make_arg_parser()
     args = arg_parser.parse_args()
 
