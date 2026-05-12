@@ -168,6 +168,10 @@ def configure():
                 '/etc/corosync/corosync.conf'
             )
     run('pcs cluster start')
+
+    # do not move resources or fence nodes before it has a full configuration
+    run('pcs property set maintenance-mode=true')
+
     run('pcs property set symmetric-cluster=false')
     run('pcs property set stonith-action=off')
     run('pcs property set batch-limit=100')
@@ -236,6 +240,9 @@ def configure():
         cmd += ' score=INFINITY'
         run(cmd)
         configure_location(service, nodes)
+
+    # configuration complete, OK to move resources or fence nodes
+    run('pcs property set maintenance-mode=false')
 
 def main():
     global cmdline_args
