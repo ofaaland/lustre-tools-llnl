@@ -10,9 +10,11 @@
 # LLNL-CODE-468512
 
 import argparse
+import os
 import re
 import sys
 import subprocess
+import tempfile
 
 cmdline_args = None
 
@@ -24,7 +26,7 @@ lustre_service_order = []
 
 skip_pattern = re.compile(r'^\s*(#.*)?\n?$')
 def should_skip(line):
-    """Returns true is the line contains only a comment or whitespace"""
+    """Returns true if the line contains only a comment or whitespace"""
     if skip_pattern.match(line):
         return True
     return False
@@ -33,6 +35,11 @@ def get_pacemaker_major_number():
     '''Get the rpm major number of pacemaker,
     and return as an int.
     '''
+    if cmdline_args.dry_run:
+        # Default to version 2 for dry-run mode, so this can be run on
+        # non-rpm based systems such as OSX
+        return 2
+
     rpm_version = subprocess.run(
         ['rpm', '-q', 'pacemaker'],
         stdout=subprocess.PIPE,
@@ -124,7 +131,15 @@ def run(cmd):
     except OSError as e:
         print("Execution failed:", e, file=sys.stderr)
 
-def configure_location(resource, nodes, fixed_score_string=None):
+def run_cib(cmd, cib_file):
+    """Run a pcs command against a shadow CIB file.
+
+    Inserts -f <cib_file> after 'pcs' in the command.
+    """
+    cmd = cmd.replace('pcs ', 'pcs -f '+cib_file+' ', 1)
+    run(cmd)
+
+def configure_location(resource, nodes, cib_file=None, fixed_score_string=None):
     if fixed_score_string is None:
         score = len(nodes)*10
     else:
@@ -134,7 +149,10 @@ def configure_location(resource, nodes, fixed_score_string=None):
         cmd = 'pcs constraint location add '+id+' '+resource
         cmd += ' '+node+' '+str(score)
         cmd += ' '+'resource-discovery=exclusive'
-        run(cmd)
+        if cib_file:
+            run_cib(cmd, cib_file)
+        else:
+            run(cmd)
         if fixed_score_string is None:
             score -= 10
 
@@ -168,10 +186,17 @@ def configure():
                 '/etc/corosync/corosync.conf'
             )
     run('pcs cluster start')
-    run('pcs property set symmetric-cluster=false')
-    run('pcs property set stonith-action=off')
-    run('pcs property set batch-limit=100')
-    run('pcs property set cluster-recheck-interval=60')
+
+    # Create shadow CIB for atomic configuration.  This should be faster, and
+    # prevents pacemaker from modifying cluster before it is fully configured.
+    fd, cib_file = tempfile.mkstemp(suffix='.xml', prefix='cluster-config-')
+    os.close(fd)  # Close the file descriptor, pcs will write to the file
+    run('pcs cluster cib '+cib_file)
+
+    run_cib('pcs property set symmetric-cluster=false', cib_file)
+    run_cib('pcs property set stonith-action=off', cib_file)
+    run_cib('pcs property set batch-limit=100', cib_file)
+    run_cib('pcs property set cluster-recheck-interval=60', cib_file)
 
     node_str = ','.join(all_nodes)
     cmd = 'pcs stonith create fence_pm fence_powerman'
@@ -181,17 +206,17 @@ def configure():
     # allow time for crashing node to write out vmcore
     cmd += ' pcmk_delay_base=60s'
     cmd += ' pcmk_delay_max=90s'
-    run(cmd)
-    run('pcs constraint location fence_pm prefers '+cmdline_args.mgmt_node)
+    run_cib(cmd, cib_file)
+    run_cib('pcs constraint location fence_pm prefers '+cmdline_args.mgmt_node, cib_file)
 
     for node in all_nodes:
         if pacemaker_major_number == 1:
-            run('pcs resource create '+node+' ocf:pacemaker:remote'+' server=e'+node+
-                ' reconnect_interval=60')
+            run_cib('pcs resource create '+node+' ocf:pacemaker:remote'+' server=e'+node+
+                ' reconnect_interval=60', cib_file)
         if pacemaker_major_number == 2:
-            run('pcs resource create --force '+node+' ocf:pacemaker:remote'+' server=e'+node+
-                ' reconnect_interval=60')
-        run('pcs constraint location '+node+' prefers '+cmdline_args.mgmt_node)
+            run_cib('pcs resource create --force '+node+' ocf:pacemaker:remote'+' server=e'+node+
+                ' reconnect_interval=60', cib_file)
+        run_cib('pcs constraint location '+node+' prefers '+cmdline_args.mgmt_node, cib_file)
 
     for zpool in zpool_order:
         # Handle a zpool name that conflicts with a node name
@@ -204,12 +229,12 @@ def configure():
         cmd += ' import_options="-f -N -d /dev/disk/by-vdev"'
         cmd += ' pool='+zpool
         cmd += ' op start timeout=805'
-        run(cmd)
+        run_cib(cmd, cib_file)
 
         # We want suspended pools to immediately fail over to the other node.
-        run('pcs resource meta '+zpool_resource+' migration-threshold=1')
+        run_cib('pcs resource meta '+zpool_resource+' migration-threshold=1', cib_file)
 
-        configure_location(zpool_resource, nodes)
+        configure_location(zpool_resource, nodes, cib_file)
 
     # Make sure that the MGS is the first service, so we can easily add order
     # constraint for the MGS before all other services.
@@ -228,14 +253,24 @@ def configure():
         nodes = all_zpools[zpool]
         cmd = 'pcs resource create '+service+' ocf:llnl:lustre'
         cmd += ' dataset='+dataset+' mountpoint=/mnt/lustre/'+service
-        run(cmd)
+        run_cib(cmd, cib_file)
         if service != 'MGS':
-            run('pcs constraint order MGS then '+service+' kind=Optional')
-        run('pcs constraint order '+zpool_resource+' then '+service)
+            run_cib('pcs constraint order MGS then '+service+' kind=Optional', cib_file)
+        run_cib('pcs constraint order '+zpool_resource+' then '+service, cib_file)
         cmd = 'pcs constraint colocation add '+service+' with '+zpool_resource
         cmd += ' score=INFINITY'
-        run(cmd)
-        configure_location(service, nodes)
+        run_cib(cmd, cib_file)
+        configure_location(service, nodes, cib_file)
+
+    # Push shadow CIB atomically to live cluster
+    run('pcs cluster cib-push '+cib_file)
+
+    # Clean up temporary CIB file
+    if cib_file and os.path.exists(cib_file):
+        try:
+            os.unlink(cib_file)
+        except OSError as e:
+            print("Warning: Could not remove temporary CIB file "+cib_file+": "+str(e), file=sys.stderr)
 
 def main():
     global cmdline_args
